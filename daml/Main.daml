@@ -1,0 +1,58 @@
+module Main where
+
+import Daml.Script
+
+template Info 
+  with 
+    publisher : Party 
+    audience : Party 
+    msg : Text
+  where 
+    signatory publisher 
+    observer audience
+    key publisher : Party
+    maintainer key
+
+template Reader 
+  with 
+    audience : Party
+    reader : Party 
+    publisher : Party
+  where
+    signatory audience 
+    controller reader can 
+      nonconsuming Reader_Fetch_Cid : ContractId FetchedInfo 
+        with 
+          infoCid : ContractId Info
+        do 
+          info <- fetch infoCid
+          create FetchedInfo with msg = info.msg, ..
+      nonconsuming Reader_Fetch_Key : ContractId FetchedInfo 
+        do 
+          (_, info) <- fetchByKey @Info publisher
+          create FetchedInfo with msg = info.msg, ..
+
+template FetchedInfo 
+  with
+    reader : Party 
+    msg : Text 
+  where 
+    signatory reader
+
+setup : Script ()
+setup = script do
+  alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
+  bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
+  carol <- allocatePartyWithHint "Carol" (PartyIdHint "Carol") 
+
+  infoCid <- submit alice $ createCmd $ Info alice bob "This is a secret messge" 
+
+  readerCid <- submit bob $ createCmd Reader with publisher = alice, audience = bob, reader = carol 
+
+  submitMustFail carol $ exerciseCmd readerCid Reader_Fetch_Cid with ..
+
+  submitMulti [carol] [bob] $ exerciseCmd readerCid Reader_Fetch_Cid with ..
+
+  submitMulti [carol] [bob] $ exerciseCmd readerCid Reader_Fetch_Key
+
+  pure ()
